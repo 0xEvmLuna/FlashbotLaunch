@@ -95,11 +95,9 @@ type CallBundleResponse struct {
 //  userStats
 // ###########
 type UserStatsResponse struct {
-	ID         uint       `json:"id"`
-	Version    string     `json:"jsonrpc"`
-	Result     *userStats `json:"result"`
-	Raw        string
-	StatusCode int
+	ID      uint       `json:"id"`
+	Version string     `json:"jsonrpc"`
+	Result  *userStats `json:"result"`
 }
 
 type userStats struct {
@@ -163,9 +161,9 @@ func New(relayRPC string) *FlashbotLaunch {
 	}
 }
 
-func (f *FlashbotLaunch) SendBundle(transactions []string, blockNumber uint64) error {
+func (f *FlashbotLaunch) SendBundle(transactions []string, blockNumber uint64) (*SendBundleResponse, error) {
 	if len(transactions) < 1 {
-		return errorTransaction
+		return nil, errorTransaction
 	}
 
 	params := SendBundleParams{
@@ -173,25 +171,28 @@ func (f *FlashbotLaunch) SendBundle(transactions []string, blockNumber uint64) e
 		BlockNumber:  WrapperBlockNumber(blockNumber),
 	}
 
+	sendBundle := &SendBundleResponse{}
 	resp := f.requestRPC(MethodSendBundle, params)
-	fmt.Println(resp)
-	return nil
+	err := json.Unmarshal(resp, sendBundle)
+	if err != nil {
+		return nil, err
+	}
+	return sendBundle, nil
 }
 
-func (f *FlashbotLaunch) GetUserStats(blockNumber uint64) error {
+func (f *FlashbotLaunch) GetUserStats(blockNumber uint64) (*UserStatsResponse, error) {
 	resp := f.requestRPC(MethodGetUserStats, blockNumber)
-	res, _ := ioutil.ReadAll(resp.Body)
-
-	user := new(userStats)
-	err := json.Unmarshal(res, &user)
+	print(string(resp))
+	user := &UserStatsResponse{}
+	err := json.Unmarshal(resp, user)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
-	return nil
+	return user, nil
 }
 
-func (f *FlashbotLaunch) requestRPC(Method string, params ...interface{}) *http.Response {
+func (f *FlashbotLaunch) requestRPC(Method string, params ...interface{}) []byte {
 	request := requestParams{
 		JsonRPC: "2.0",
 		Id:      1,
@@ -226,7 +227,9 @@ func (f *FlashbotLaunch) requestRPC(Method string, params ...interface{}) *http.
 	if err != nil {
 		log.Fatal(err)
 	}
-	return resp
+
+	res, _ := ioutil.ReadAll(resp.Body)
+	return res
 }
 
 func flashbotHeader(signature []byte, privateKey *ecdsa.PrivateKey) string {
