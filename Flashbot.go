@@ -38,7 +38,7 @@ const (
 )
 
 var (
-	errorTransaction = errors.New("Transaction parameters are empty")
+	errorTransaction = errors.New("nil")
 )
 
 type FlashbotLaunch struct {
@@ -46,7 +46,7 @@ type FlashbotLaunch struct {
 	PrivateKey *ecdsa.PrivateKey
 }
 
-type requestParams struct {
+type metaRequestParams struct {
 	JsonRPC string      `json:"jsonrpc"`
 	Id      int         `json:"id"`
 	Method  string      `json:"method"`
@@ -65,11 +65,9 @@ type SendBundleParams struct {
 }
 
 type SendBundleResponse struct {
-	ID         uint          `json:"id"`
-	Version    string        `json:"jsonrpc"`
-	Result     *bundleResult `json:"result"`
-	Raw        string
-	StatusCode int
+	ID      uint          `json:"id"`
+	Version string        `json:"jsonrpc"`
+	Result  *bundleResult `json:"result"`
 }
 
 // ############
@@ -89,6 +87,21 @@ type CallBundleResponse struct {
 	Error      *errorResult `json:"error"`
 	Raw        string
 	StatusCode int
+}
+
+// ####################
+//  PrivateTransaction
+// ####################
+type SendPrivateTx struct {
+	Transaction    string          `json:"txs"`
+	MaxBlockNumber string          `json:"maxBlockNumber"`
+	Preferences    map[string]bool `json:"preferences"`
+}
+
+type SendPrivateTxResponse struct {
+	JsonRPC string `json:"jsonrpc"`
+	Id      int    `json:"id"`
+	Result  string `json:"result"`
 }
 
 // ###########
@@ -150,9 +163,9 @@ func New(relayRPC string) *FlashbotLaunch {
 
 	rpc, _ := RelayDefaultRPC(relayRPC)
 
-	privateKey := os.Getenv("PrivateKey")
+	privateKey := os.Getenv("PRIVATE_KEY")
 	if privateKey == "" {
-		log.Fatal("The PrivateKey is nil!")
+		log.Fatal("The PrivateKey is nil, please export it !")
 	}
 
 	return &FlashbotLaunch{
@@ -166,43 +179,76 @@ func (f *FlashbotLaunch) SendBundle(transactions []string, blockNumber uint64) (
 		return nil, errorTransaction
 	}
 
-	params := SendBundleParams{
+	args := SendBundleParams{
 		Transactions: transactions,
-		BlockNumber:  WrapperBlockNumber(blockNumber),
+		BlockNumber:  HextoBlockNumber(blockNumber),
 	}
 
-	sendBundle := &SendBundleResponse{}
-	resp := f.requestRPC(MethodSendBundle, params)
-	err := json.Unmarshal(resp, sendBundle)
-	if err != nil {
+	resp := f.requestRPC(MethodSendBundle, args)
+	sendBundleResp := new(SendBundleResponse)
+	if err := json.Unmarshal(resp, sendBundleResp); err != nil {
 		return nil, err
 	}
-	return sendBundle, nil
+
+	return sendBundleResp, nil
+}
+
+func (f *FlashbotLaunch) CallBundle(transaction []string, blockNumber uint64) (*CallBundleResponse, error) {
+	if len(transaction) < 1 {
+		return nil, errorTransaction
+	}
+
+	args := CallBundleParams{
+		Transactions:     transaction,
+		BlockNumber:      HextoBlockNumber(blockNumber),
+		StateBlockNumber: "latest",
+		Timestamp:        1615920932,
+	}
+
+	resp := f.requestRPC(MethodCallBundle, args)
+	callBUndleResp := new(CallBundleResponse)
+	if err := json.Unmarshal(resp, callBUndleResp); err != nil {
+		return nil, err
+	}
+
+	return callBUndleResp, nil
+}
+
+func (f *FlashbotLaunch) SendPrivateTransaction(tx string, maxBlockNumber string) (*SendPrivateTxResponse, error) {
+	args := SendPrivateTx{
+		Transaction:    tx,
+		MaxBlockNumber: maxBlockNumber,
+	}
+
+	resp := f.requestRPC(MethodSendPrivateTransaction, args)
+	transactionResp := new(SendPrivateTxResponse)
+	if err := json.Unmarshal(resp, transactionResp); err != nil {
+		return nil, err
+	}
+
+	return transactionResp, nil
 }
 
 func (f *FlashbotLaunch) GetUserStats(blockNumber uint64) (*UserStatsResponse, error) {
 	resp := f.requestRPC(MethodGetUserStats, blockNumber)
-	print(string(resp))
-	user := &UserStatsResponse{}
-	err := json.Unmarshal(resp, user)
-	if err != nil {
+	userStatusResp := new(UserStatsResponse)
+	if err := json.Unmarshal(resp, userStatusResp); err != nil {
 		return nil, err
 	}
 
-	return user, nil
+	return userStatusResp, nil
 }
 
 func (f *FlashbotLaunch) requestRPC(Method string, params ...interface{}) []byte {
-	request := requestParams{
+	requestArgs := metaRequestParams{
 		JsonRPC: "2.0",
 		Id:      1,
 		Method:  Method,
 		Params:  append(params, params...),
 	}
-	fmt.Println("request", request)
 
 	client := &http.Client{Timeout: 20 * time.Second}
-	payload, err := json.Marshal(request)
+	payload, err := json.Marshal(requestArgs)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -233,8 +279,7 @@ func (f *FlashbotLaunch) requestRPC(Method string, params ...interface{}) []byte
 }
 
 func flashbotHeader(signature []byte, privateKey *ecdsa.PrivateKey) string {
-	return crypto.PubkeyToAddress(privateKey.PublicKey).Hex() +
-		":" + hexutil.Encode(signature)
+	return crypto.PubkeyToAddress(privateKey.PublicKey).Hex() + ":" + hexutil.Encode(signature)
 }
 
 func HexToECDSA(privateKey string) *ecdsa.PrivateKey {
@@ -245,7 +290,7 @@ func HexToECDSA(privateKey string) *ecdsa.PrivateKey {
 	return key
 }
 
-func WrapperBlockNumber(blockNumber uint64) string {
+func HextoBlockNumber(blockNumber uint64) string {
 	return hexutil.EncodeUint64(blockNumber)
 }
 
